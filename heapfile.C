@@ -120,13 +120,29 @@ const Status HeapFile::getRecord(const RID & rid, Record & rec)
     Status status;
 
     // cout<< "getRecord. record (" << rid.pageNo << "." << rid.slotNo << ")" << endl;
-   
-   
-   
-   
-   
-   
-   
+    
+    //Check if current page holds wanted record
+    if(curPage == true && curPageNo == rid.pageNo) {
+        status = curPage->getRecord(rid, rec);
+    }
+    //If not, unpin page and find correct page
+    else {
+        status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag)
+        curRec = rid;
+        curPageNo = rid.pageNo;
+        curDirtyFlag = false;
+        
+        //Read in correct page into buffer
+        status = bufMgr->readPage(filePtr, curPageNo, curPage);
+        
+        //Make sure page is in buffer
+        if(status != OK) {
+            return BADPAGENO;
+        }
+        
+        status = curPage->getRecord(curRec, rec);
+    }
+    return status;
 }
 
 HeapFileScan::HeapFileScan(const string & name,
