@@ -122,12 +122,12 @@ const Status HeapFile::getRecord(const RID & rid, Record & rec)
     // cout<< "getRecord. record (" << rid.pageNo << "." << rid.slotNo << ")" << endl;
     
     //Check if current page holds wanted record
-    if(curPage == true && curPageNo == rid.pageNo) {
+    if(curPage != NULL && curPageNo == rid.pageNo) {
         status = curPage->getRecord(rid, rec);
     }
     //If not, unpin page and find correct page
     else {
-        status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag)
+        status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag);
         curRec = rid;
         curPageNo = rid.pageNo;
         curDirtyFlag = false;
@@ -240,16 +240,41 @@ const Status HeapFileScan::scanNext(RID& outRid)
     int 	nextPageNo;
     Record      rec;
 
-    
-	
-	
-	
-	
-	
-	
-	
-	
-	
+    while(true) {
+
+        //Scan this page from curRec
+        while(true) {
+            status = curPage->nextRecord(curRec, nextRid);
+            if (status == OK) {
+                HeapFile::getRecord(nextRid, rec);
+                if (matchRec(rec)) {
+                    outRid = nextRid;
+                    return OK;
+                }
+            } else if (status = ENDOFPAGE) {
+                break;
+            } else {
+                return status;
+            }
+        }
+
+
+        //Scan to next page that contains records
+        while(true) {
+            if (curPage != NULL) {
+                status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag);
+                if (status != OK) return status;
+            }
+
+            status = curPage->getNextPage(curPageNo);
+            if(status != OK) return status;
+            status = bufMgr->readPage(filePtr, curPageNo, curPage);
+            if(status != OK) return status;
+
+            status = curPage->firstRecord(curRec);
+            if(status == OK) break;
+        }
+    }
 }
 
 
@@ -372,6 +397,47 @@ const Status InsertFileScan::insertRecord(const Record & rec, RID& outRid)
         // will never fit on a page, so don't even bother looking
         return INVALIDRECLEN;
     }
+
+    if(curPage == NULL) {
+        curPageNo = headerPage->lastPage;
+        status = bufMgr->readPage(filePtr, curPageNo, curPage);
+        if(status != OK) return status;
+    }
+
+    status = curPage->insertRecord(rec, rid);
+    if(status != NOSPACE) {
+
+        status = bufMgr->allocPage(filePtr, newPageNo, newPage);
+        if (status != OK) return status;
+        
+        //unpin previous page
+        status = bufMgr->unPinPage(filePtr, curPageNo, true);
+        if(status != OK) return status;
+
+        // link to last page
+        curPageNo = headerPage->lastPage;
+        status = bufMgr->readPage(filePtr, curPageNo, curPage);
+        if(status != OK) return status;
+        curPage->setNextPage(newPageNo);
+        status = bufMgr->unPinPage(filePtr, curPageNo, true);
+        if(status != OK) return status;
+
+        //update header
+        headerPage->lastPage = newPageNo;
+        headerPage->pageCnt++;
+
+        curPage = newPage;
+        curPageNo = newPageNo;
+
+        //insert record
+        status = curPage->insertRecord(rec, rid);
+        if(status != OK) return status;
+    }
+
+    headerPage->recCnt++;
+    curDirtyFlag = true;
+    hdrDirtyFlag = true;
+
 
   
   
