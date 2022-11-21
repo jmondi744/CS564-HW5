@@ -71,7 +71,7 @@ HeapFile::HeapFile(const string & fileName, Status& returnStatus)
 
                 status = bufMgr->readPage(filePtr, headerPage->firstPage, curPage);
                 if(status == OK) {
-                    curPageNo = headerPage->lastPage;
+                    curPageNo = headerPage->firstPage;
                     curDirtyFlag = false;
                     curRec = NULLRID;
                 } 
@@ -267,6 +267,10 @@ const Status HeapFileScan::scanNext(RID& outRid)
 
     if(curPage == NULL) {
         //Go to first page with records
+        curPageNo = headerPage->firstPage;
+        status = curPage->getNextPage(curPageNo);
+        if(status != OK) return status;
+
         while(true) {
             if (curPage != NULL) {
                 status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag);
@@ -279,7 +283,14 @@ const Status HeapFileScan::scanNext(RID& outRid)
             if(status != OK) return status;
 
             status = curPage->firstRecord(curRec);
-            if(status == OK) break;
+            if(status == OK) {
+                getRecord(rec);
+                if (matchRec(rec)) {
+                    outRid = curRec;
+                    return OK;
+                }
+                break;
+            }
         }
     }
 
@@ -289,9 +300,10 @@ const Status HeapFileScan::scanNext(RID& outRid)
         while(true) {
             status = curPage->nextRecord(curRec, nextRid);
             if (status == OK) {
-                HeapFile::getRecord(nextRid, rec);
+                curRec = nextRid;
+                getRecord(rec);
                 if (matchRec(rec)) {
-                    outRid = nextRid;
+                    outRid = curRec;
                     return OK;
                 }
             } else if (status = ENDOFPAGE) {
@@ -304,18 +316,29 @@ const Status HeapFileScan::scanNext(RID& outRid)
 
         //Scan to next page that contains records
         while(true) {
-            if (curPage != NULL) {
-                status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag);
-                if (status != OK) return status;
-            }
-
-            status = curPage->getNextPage(curPageNo);
+            int tmpPageNo;
+            status = curPage->getNextPage(tmpPageNo);
             if(status != OK) return status;
+            if(tmpPageNo == -1) return FILEEOF;
+
+            status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag);
+            if (status != OK) return status;
+
+            curPageNo = tmpPageNo;
+
             status = bufMgr->readPage(filePtr, curPageNo, curPage);
             if(status != OK) return status;
+            curDirtyFlag = false;
 
             status = curPage->firstRecord(curRec);
-            if(status == OK) break;
+            if(status == OK) {
+                getRecord(rec);
+                if (matchRec(rec)) {
+                    outRid = curRec;
+                    return OK;
+                }
+                break;
+            }
         }
     }
 }
@@ -448,7 +471,7 @@ const Status InsertFileScan::insertRecord(const Record & rec, RID& outRid)
     }
 
     status = curPage->insertRecord(rec, rid);
-    if(status != NOSPACE) {
+    if(status == NOSPACE) {
 
         status = bufMgr->allocPage(filePtr, newPageNo, newPage);
         if (status != OK) return status;
