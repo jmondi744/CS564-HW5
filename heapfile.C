@@ -64,12 +64,18 @@ HeapFile::HeapFile(const string & fileName, Status& returnStatus)
 		
 		status = filePtr->getFirstPage(headerPageNo);
         if(status == OK) {
-            status = bufMgr->readPage(filePtr, ((FileHdrPage*)filePtr)->firstPage, curPage);
+            Page* tmpHeaderPage;
+            status = bufMgr->readPage(filePtr, headerPageNo, tmpHeaderPage);
             if(status == OK) {
-                curPageNo =((FileHdrPage*)filePtr)->lastPage;
-                curDirtyFlag = false;
-                curRec = NULLRID;
-            } 
+                headerPage = (FileHdrPage*) tmpHeaderPage;
+
+                status = bufMgr->readPage(filePtr, headerPage->firstPage, curPage);
+                if(status == OK) {
+                    curPageNo = headerPage->lastPage;
+                    curDirtyFlag = false;
+                    curRec = NULLRID;
+                } 
+            }
         }
 
 		
@@ -258,6 +264,24 @@ const Status HeapFileScan::scanNext(RID& outRid)
     RID		tmpRid;
     int 	nextPageNo;
     Record      rec;
+
+    if(curPage == NULL) {
+        //Go to first page with records
+        while(true) {
+            if (curPage != NULL) {
+                status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag);
+                if (status != OK) return status;
+            }
+
+            status = curPage->getNextPage(curPageNo);
+            if(status != OK) return status;
+            status = bufMgr->readPage(filePtr, curPageNo, curPage);
+            if(status != OK) return status;
+
+            status = curPage->firstRecord(curRec);
+            if(status == OK) break;
+        }
+    }
 
     while(true) {
 
