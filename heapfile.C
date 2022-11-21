@@ -17,18 +17,28 @@ const Status createHeapFile(const string fileName)
     {
 		// file doesn't exist. First create it and allocate
 		// an empty header page and data page.
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
+		status = db.createFile(fileName);
+        if(status != OK) return status;
+        status = db.openFile(fileName, file);
+        if(status != OK) return status;
+        Page* page;
+        status = bufMgr->allocPage(file, hdrPageNo, page);
+        if(status != OK) return status;
+        hdrPage = (FileHdrPage*) page;
+        strcpy(hdrPage->fileName, fileName.c_str());
+        hdrPage->pageCnt = 1;
+        hdrPage->recCnt = 0;
+        status = bufMgr->allocPage(file, newPageNo, newPage);
+        if(status != OK) return status;
+        newPage->init(newPageNo);
+        hdrPage->firstPage = newPageNo;
+        hdrPage->lastPage = newPageNo;
+        status = bufMgr->unPinPage(file, hdrPageNo, true);
+        if(status != OK) return status;
+        status = bufMgr->unPinPage(file, newPageNo, true);
+        if(status != OK) return status;
+        status = db.closeFile(file);
+        return status;
 		
     }
     return (FILEEXISTS);
@@ -52,7 +62,16 @@ HeapFile::HeapFile(const string & fileName, Status& returnStatus)
     if ((status = db.openFile(fileName, filePtr)) == OK)
     {
 		
-		
+		status = filePtr->getFirstPage(headerPageNo);
+        if(status == OK) {
+            status = bufMgr->readPage(filePtr, ((FileHdrPage*)filePtr)->firstPage, curPage);
+            if(status == OK) {
+                curPageNo =((FileHdrPage*)filePtr)->lastPage;
+                curDirtyFlag = false;
+                curRec = NULLRID;
+            } 
+        }
+
 		
 		
 		
@@ -121,7 +140,15 @@ const Status HeapFile::getRecord(const RID & rid, Record & rec)
 
     // cout<< "getRecord. record (" << rid.pageNo << "." << rid.slotNo << ")" << endl;
    
-   
+   if(curPage->getRecord(rid, rec) == OK) {
+    return OK;
+   } else {
+    status = bufMgr->unPinPage(filePtr, curPageNo, curDirtyFlag);
+    if(status == OK) {
+        status = bufMgr->readPage(filePtr, rid.pageNo, curPage);
+    }
+    return status;
+   }
    
    
    
